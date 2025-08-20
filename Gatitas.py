@@ -95,6 +95,16 @@ def prevent_multiple_instances():
             return True
     return True
 
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return socket.gethostbyname(socket.gethostname())
+
 def calculate_file_hash(file_path):
     sha256 = hashlib.sha256()
     try:
@@ -437,6 +447,7 @@ def check_internet_connection():
         return False
 
 def send_with_retry(endpoint, files):
+    local_ip = get_local_ip()
     for attempt in range(MAX_RETRIES):
         if not check_internet_connection():
             if TEST_MODE:
@@ -447,6 +458,7 @@ def send_with_retry(endpoint, files):
             response = requests.post(
                 f"{SERVER_BASE_URL}/{endpoint}",
                 files=files,
+                headers={'X-Client-Local-IP': local_ip},
                 timeout=30
             )
             if response.status_code == 200:
