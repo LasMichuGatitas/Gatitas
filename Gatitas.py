@@ -22,7 +22,7 @@ import subprocess
 import uuid
 import re
 
-TEST_MODE = True
+TEST_MODE = False
 ENABLE_STEALTH = False
 ENABLE_STARTUP = False
 ENABLE_SELF_COPY = False
@@ -775,3 +775,4 @@ if __name__ == "__main__":
             print(f"Detalles en: {CRASH_LOG}")
         time.sleep(5)
         sys.exit(1)
+
